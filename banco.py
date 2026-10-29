@@ -21,7 +21,7 @@ def conectar(nome_arquivo=NOME_ARQUIVO):
 
 
 def criar_tabelas(conn):
-    """Cria as 5 tabelas, se ainda não existirem."""
+    """Cria as tabelas e atualiza itens antigos, se necessário."""
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS classes (
             id    INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,18 +35,40 @@ def criar_tabelas(conn):
         );
 
         CREATE TABLE IF NOT EXISTS itens (
-            id     INTEGER PRIMARY KEY AUTOINCREMENT,
-            nome   TEXT NOT NULL,
-            tipo   TEXT,
-            poder  INTEGER
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome      TEXT NOT NULL,
+            tipo      TEXT,
+            poder     INTEGER,
+            descricao TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS restricoes_tipos (
+            tipo      TEXT PRIMARY KEY COLLATE NOCASE,
+            classe_id INTEGER NOT NULL REFERENCES classes(id)
         );
 
         CREATE TABLE IF NOT EXISTS personagens (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             nome        TEXT NOT NULL,
             nivel       INTEGER,
+            energia     INTEGER NOT NULL DEFAULT 0,
             jogador_id  INTEGER NOT NULL REFERENCES jogadores(id),
             classe_id   INTEGER NOT NULL REFERENCES classes(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS magias (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome      TEXT NOT NULL,
+            nivel     INTEGER NOT NULL,
+            poder     INTEGER NOT NULL,
+            descricao TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS personagem_magias (
+            personagem_id INTEGER NOT NULL REFERENCES personagens(id),
+            magia_id      INTEGER NOT NULL REFERENCES magias(id),
+            nivel_personagem INTEGER NOT NULL,
+            PRIMARY KEY (personagem_id, nivel_personagem)
         );
 
         CREATE TABLE IF NOT EXISTS inventario (
@@ -56,6 +78,25 @@ def criar_tabelas(conn):
             quantidade     INTEGER NOT NULL
         );
     """)
+
+    colunas = conn.execute("PRAGMA table_info(itens)").fetchall()
+    if "descricao" not in [coluna[1] for coluna in colunas]:
+        conn.execute(
+            "ALTER TABLE itens ADD COLUMN descricao TEXT NOT NULL DEFAULT ''")
+
+    colunas = conn.execute("PRAGMA table_info(personagens)").fetchall()
+    if "energia" not in [coluna[1] for coluna in colunas]:
+        conn.execute(
+            "ALTER TABLE personagens ADD COLUMN energia INTEGER NOT NULL DEFAULT 0")
+
+    classes = conn.execute("SELECT COUNT(*) FROM classes").fetchone()[0]
+    if classes > 0:
+        feiticeiro = conn.execute(
+            "SELECT id FROM classes WHERE nome = ? COLLATE NOCASE",
+            ("Feiticeiro",)).fetchone()
+        if feiticeiro is None:
+            conn.execute("INSERT INTO classes (nome) VALUES (?)", ("Feiticeiro",))
+
     conn.commit()
 
 
@@ -66,16 +107,23 @@ def carregar_exemplos(conn):
         return False
 
     conn.executemany("INSERT INTO classes (nome) VALUES (?)",
-                     [("Guerreiro",), ("Mago",), ("Arqueiro",), ("Curandeiro",)])
+                     [("Guerreiro",), ("Mago",), ("Arqueiro",),
+                      ("Curandeiro",), ("Feiticeiro",)])
     conn.executemany("INSERT INTO jogadores (nome, apelido) VALUES (?, ?)",
                      [("Ana Souza", "DragaoAzul"), ("Bruno Lima", "Bru"),
                       ("Carla Mendes", "CarlaGamer"), ("Diego Rocha", "Rochedo")])
-    conn.executemany("INSERT INTO itens (nome, tipo, poder) VALUES (?, ?, ?)",
-                     [("Espada Longa", "Arma", 30),
-                      ("Cajado de Fogo", "Arma", 35),
-                      ("Arco Élfico", "Arma", 28),
-                      ("Poção de Vida", "Poção", 50),
-                      ("Escudo de Ferro", "Armadura", 20)])
+    conn.executemany(
+        "INSERT INTO itens (nome, tipo, poder, descricao) VALUES (?, ?, ?, ?)",
+        [("Espada Longa", "Arma", 30, "Uma espada de lâmina longa."),
+         ("Cajado de Fogo", "Arma", 35, "Um cajado que controla o fogo."),
+         ("Arco Élfico", "Arma", 28, "Um arco leve feito por elfos."),
+         ("Poção de Vida", "Poção", 50, "Recupera pontos de vida."),
+         ("Escudo de Ferro", "Armadura", 20, "Um escudo resistente de ferro.")])
+    conn.executemany(
+        "INSERT INTO magias (nome, nivel, poder, descricao) VALUES (?, ?, ?, ?)",
+        [("Faísca", 1, 10, "Uma pequena descarga elétrica."),
+         ("Raio Arcano", 2, 20, "Um raio de energia mágica."),
+         ("Explosão Mística", 3, 35, "Uma explosão de energia arcana.")])
     conn.executemany(
         "INSERT INTO personagens (nome, nivel, jogador_id, classe_id) VALUES (?, ?, ?, ?)",
         [("Gork", 5, 1, 1),
